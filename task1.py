@@ -5,6 +5,8 @@ from tqdm import tqdm
 import pandas as pd
 import sys
 
+import os
+
 from utils import gen_uniq_seq
 
 class BloomFilterNumpy:
@@ -74,12 +76,14 @@ def run(bf_sizes: List,
     
 
 if __name__ == '__main__':
-    
+
     bf_sizes = [8, 64, 1024, 65536, 16777216]
     set_sizes = [5, 50, 500, 5000, 5000000]
+
+    os.makedirs('results', exist_ok=True)
     
     result_np = run(bf_sizes=bf_sizes,
                     set_sizes=set_sizes)
     result_df = pd.DataFrame(result_np)
-    result_df.to_csv('np_df.csv')
+    result_df.to_csv('results/np_df.csv')
     print(result_df)

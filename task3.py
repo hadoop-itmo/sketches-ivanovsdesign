@@ -4,6 +4,7 @@ from typing import List
 from tqdm import tqdm
 import pandas as pd
 import sys
+import os
 
 from utils import gen_uniq_seq
 
@@ -136,8 +137,11 @@ def run_cap_experiments():
     return results
 
 if __name__ == '__main__':
+
+    os.makedirs('results', exist_ok=True)
+
     results = run_cap_experiments()
     results_df = pd.DataFrame(results)
-    results_df.to_csv('cap_df.csv')
+    results_df.to_csv('results/cap_df.csv')
     print(results_df)
 
