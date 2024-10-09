@@ -1,7 +1,47 @@
+from typing import List
 import csv
 from collections import defaultdict
 import os
 import tempfile
+
+from utils import gen_grouped_seq
+import os
+
+import uuid
+import random
+
+# Modify the key generation to ensure overlap
+def gen_grouped_seq_fixed_keys(name: str,
+                               pattern: List,
+                               *,
+                               n_extra_cols: int = 0,
+                               to_shuffle: bool = False):
+    '''
+    Generates keys without uuid
+    '''
+    def gen():
+        num = 0
+        for n_keys, n_records in pattern:
+            for i1 in range(n_keys):
+                # Fixed key for ensuring overlap
+                body = f"key{i1 + num}"
+                for i2 in range(n_records):
+                    for j in range(n_extra_cols):
+                        body += f",{uuid.uuid4()}"
+                    yield body
+            num += n_keys
+
+    if to_shuffle:
+        data = list(gen())
+        random.shuffle(data)
+        result = data
+    else:
+        result = gen()
+
+    with open(name, "wt") as f:
+        for v in result:
+            print(v, file=f)
+
 
 def count_keys(file_path: str,
                threshold: int) -> dict:
@@ -64,7 +104,11 @@ def find_common_heavy_keys(file1, file2, threshold):
 
 
 if __name__ == '__main__':
-    
+
+    pattern = [(10, 70000), (50, 30000)]  # 10 keys with 70,000 records each, 50 keys with 30,000 records
+    gen_grouped_seq_fixed_keys("file1.csv", pattern, to_shuffle=True)
+    gen_grouped_seq_fixed_keys("file2.csv", pattern, to_shuffle=True)
+
     file1 = 'file1.csv'
     file2 = 'file2.csv'
     threshold = 60000
