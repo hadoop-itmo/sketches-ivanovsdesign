@@ -120,3 +120,6 @@ def run_experiments():
     os.remove("file2_large_join.csv")
     os.remove("file1_moderate.csv")
     os.remove("file2_moderate.csv")
+
+if __name__ == '__main__':
+    run_experiments()
