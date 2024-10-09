@@ -80,6 +80,8 @@ def run(bf_sizes: List,
                     }
                 )
     
+    return result_np_k
+    
 
 if __name__ == '__main__':
     
