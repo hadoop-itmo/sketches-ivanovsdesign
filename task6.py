@@ -35,7 +35,7 @@ def estimate_join_size(file1, file2):
     unique_count1 = hll1.est_size()
     unique_count2 = hll2.est_size()
     
-    # If both have less than 1 million unique keys, calculate exact intersection
+    # If both have less than 10k unique keys, calculate exact intersection
     if unique_count1 <= 10_000 and unique_count2 <= 10_000:
         keys1 = set()
         keys2 = set()
@@ -87,7 +87,7 @@ def gen_shared_keys(file1_path: str,
             f2.write(f"{uuid.uuid4()}\n")
 
 def run_experiments():
-    # Experiment 1: Files with less than 1 million unique keys for exact intersection
+    # Experiment 1: Files with less than 10k million unique keys for exact intersection
     gen_uniq_seq("file1_exact.csv", 5000)
     gen_uniq_seq("file2_exact.csv", 4500)
     print("Experiment 1: Exact Intersection Test")
