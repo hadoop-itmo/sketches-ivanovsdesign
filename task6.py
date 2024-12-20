@@ -3,71 +3,16 @@ import csv
 import os 
 import uuid
 
-from task3 import CountingBloomFilter
-from task4 import HyperLogLog
+from task2 import KBloomFilterNumpy
 
 from utils import gen_uniq_seq
 
-def process_file(file_path: str,
-                 bloom_filter: Callable,
-                 hll: Callable) -> None:
-    with open(file_path, newline='') as csvfile:
-        reader = csv.reader(csvfile)
-        for row in reader:
-            key = row[0].strip()
-            hll.put(key)
-            bloom_filter.put(key)
+import csv
+import mmh3
+from pybloom_live import BloomFilter
+from collections import defaultdict, Counter
 
-def estimate_join_size(file1, file2):
-    # Initialize HyperLogLog for estimating unique keys
-    hll1 = HyperLogLog(b=14)
-    hll2 = HyperLogLog(b=14)
-    
-    # Initialize Counting Bloom Filters
-    bloom_filter1 = CountingBloomFilter(k=4, n=1000000, cap=4)
-    bloom_filter2 = CountingBloomFilter(k=4, n=1000000, cap=4)
-    
-    # Process both files
-    process_file(file1, bloom_filter1, hll1)
-    process_file(file2, bloom_filter2, hll2)
-    
-    # Estimate unique counts
-    unique_count1 = hll1.est_size()
-    unique_count2 = hll2.est_size()
-    
-    # If both have less than 10k unique keys, calculate exact intersection
-    if unique_count1 <= 10_000 and unique_count2 <= 10_000:
-        keys1 = set()
-        keys2 = set()
-        with open(file1, newline='') as csvfile:
-            reader = csv.reader(csvfile)
-            for row in reader:
-                keys1.add(row[0].strip())
-        
-        with open(file2, newline='') as csvfile:
-            reader = csv.reader(csvfile)
-            for row in reader:
-                keys2.add(row[0].strip())
-        
-        exact_intersection = keys1.intersection(keys2)
-        print(f"Exact intersection: {len(exact_intersection)}")
-        return len(exact_intersection)
-    
-    # Estimate intersection size using Bloom Filters
-    intersection_estimate = 0
-    with open(file1, newline='') as csvfile:
-        reader = csv.reader(csvfile)
-        for row in reader:
-            key = row[0].strip()
-            if bloom_filter2.get(key):
-                intersection_estimate += 1
-
-    # Determine if the estimated intersection size suggests a large join
-    if intersection_estimate > 100_000:
-        return "> 100,000 (large join)"
-    
-    print(f"Estimated join size: {intersection_estimate}")
-    return f"Estimated join size: {intersection_estimate}"
+import time
 
 def gen_shared_keys(file1_path: str,
                     file2_path: str,
@@ -86,40 +31,127 @@ def gen_shared_keys(file1_path: str,
         for _ in range(unique_keys2):
             f2.write(f"{uuid.uuid4()}\n")
 
-def run_experiments():
-    # Experiment 1: Files with less than 10k million unique keys for exact intersection
-    gen_uniq_seq("file1_exact.csv", 5000)
-    gen_uniq_seq("file2_exact.csv", 4500)
-    print("Experiment 1: Exact Intersection Test")
-    print(estimate_join_size("file1_exact.csv", "file2_exact.csv"))
+def read_csv_keys(file_path):
+    keys = []
+    with open(file_path, 'r') as file:
+        reader = csv.reader(file)
+        for row in reader:
+            if row:
+                keys.append(row[0])
+    return keys
 
+def estimate_join_size(file1: str,
+                       file2: str) -> int:
+    # Parameters for Bloom Filter and Count-Min Sketch
+    bloom_filter_size = 10**8  # 1 million unique keys
+    bloom_filter_error_rate = 0.01
+    bloom_filter_k = 4
+    cm_depth = 4
+    cm_width = 10**6
+
+    # Initialize Bloom Filter
+    bloom_filter = BloomFilter(capacity=bloom_filter_size, error_rate=bloom_filter_error_rate)
+    #bloom_filter = KBloomFilterNumpy(n=bloom_filter_size, k=bloom_filter_k)
+
+    # Initialize Count-Min Sketch for file1
+    cm_sketch_file1 = defaultdict(int)
+
+    # Read file1 and populate Bloom Filter and Count-Min Sketch
+    keys_file1 = read_csv_keys(file1)
+    unique_keys_file1 = set()
+    for key in keys_file1:
+        bloom_filter.add(key)
+        hash_val = mmh3.hash(key)
+        cm_sketch_file1[hash_val % (cm_width * cm_depth)] += 1
+        unique_keys_file1.add(key)
+
+    # Check if we can switch to exact counting
+    if len(unique_keys_file1) <= 10**6:
+        # Exact counting for file1
+        counter_file1 = Counter(keys_file1)
+
+    # Initialize Count-Min Sketch for file2
+    cm_sketch_file2 = defaultdict(int)
+
+    # Read file2 and populate Count-Min Sketch
+    keys_file2 = read_csv_keys(file2)
+    unique_keys_file2 = set()
+    for key in keys_file2:
+        hash_val = mmh3.hash(key)
+        cm_sketch_file2[hash_val % (cm_width * cm_depth)] += 1
+        unique_keys_file2.add(key)
+
+    # Check if we can switch to exact counting
+    if len(unique_keys_file2) <= 10**6:
+        # Exact counting for file2
+        counter_file2 = Counter(keys_file2)
+
+    # Estimate JOIN size
+    join_size_estimate = 0
+    if len(unique_keys_file1) <= 10**6 and len(unique_keys_file2) <= 10**6:
+        # Exact counting for small files
+        for key in counter_file1:
+            if key in counter_file2:
+                join_size_estimate += counter_file1[key] * counter_file2[key]
+    else:
+        # Probabilistic estimation for large files
+        for key in keys_file2:
+            if key in bloom_filter:  # Check if key is likely in file1
+                hash_val = mmh3.hash(key)
+                count_file1 = cm_sketch_file1[hash_val % (cm_width * cm_depth)]
+                count_file2 = cm_sketch_file2[hash_val % (cm_width * cm_depth)]
+                join_size_estimate += count_file1 * count_file2
+
+                # If the estimate exceeds the threshold, stop and return a high estimate
+                if join_size_estimate > 10**7:
+                    return "JOIN size exceeds 10 million"
+
+    return join_size_estimate
+
+def run_experiments():
     # Experiment 2: Non-intersecting sets with high confidence of zero intersection
     gen_uniq_seq("file1_non_intersect.csv", 100000)
     gen_uniq_seq("file2_non_intersect.csv", 101000)
-    print("Experiment 2: Non-Intersecting Sets Test")
+    print("Experiment: Non-Intersecting Sets Test")
     print(estimate_join_size("file1_non_intersect.csv", "file2_non_intersect.csv"))
 
     # Experiment 3: Large join size detection (threshold 100,000)
-    shared_keys_large = [str(uuid.uuid4()) for _ in range(105_000)]
-    gen_shared_keys("file1_large_join.csv", "file2_large_join.csv", shared_keys_large, 50_000, 50_000)
-    print("Experiment 3: Large Join Detection Test")
+    shared_keys_large = [str(uuid.uuid4()) for _ in range(1_100_000)]
+    gen_shared_keys("file1_large_join.csv", "file2_large_join.csv", shared_keys_large, 100_000, 100_000)
+    print("Experiment: Large size JOIN")
     print(estimate_join_size("file1_large_join.csv", "file2_large_join.csv"))
 
     # Experiment 4: Reasonably accurate estimation for moderate intersection
     shared_keys_moderate = [str(uuid.uuid4()) for _ in range(40_000)]
     gen_shared_keys("file1_moderate.csv", "file2_moderate.csv", shared_keys_moderate, 40_000, 40_000)
-    print("Experiment 4: Moderate Intersection Estimation Test")
+    print("Experiment: Moderate size JOIN")
     print(estimate_join_size("file1_moderate.csv", "file2_moderate.csv"))
 
     # Clean up generated files
-    os.remove("file1_exact.csv")
-    os.remove("file2_exact.csv")
     os.remove("file1_non_intersect.csv")
     os.remove("file2_non_intersect.csv")
     os.remove("file1_large_join.csv")
     os.remove("file2_large_join.csv")
     os.remove("file1_moderate.csv")
     os.remove("file2_moderate.csv")
+    
 
 if __name__ == '__main__':
+    start_time = time.time()
     run_experiments()
+    print("--- %s seconds ---" % (time.time() - start_time))
+    
+    '''
+    Expected output: 
+    
+    (venv) (base) a1@MacBook-Pro-4 sketches-ivanovsdesign % python task6.py
+    0
+    0
+    Experiment: Non-Intersecting Sets Test
+    0
+    Experiment: Large size JOIN
+    2161483
+    Experiment: Moderate size JOIN
+    40000
+    --- 35.97428798675537 seconds ---
+    '''
