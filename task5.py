@@ -1,14 +1,11 @@
 from typing import List
 import csv
+import mmh3
 from collections import defaultdict
-import os
-import tempfile
-
-from utils import gen_grouped_seq
-import os
 
 import uuid
 import random
+
 
 # Modify the key generation to ensure overlap
 def gen_grouped_seq_fixed_keys(name: str,
@@ -43,75 +40,87 @@ def gen_grouped_seq_fixed_keys(name: str,
             print(v, file=f)
 
 
-def count_keys(file_path: str,
-               threshold: int) -> dict:
-    """
-    Counts keys and saves it into temp files,
-    if memory threshold `chunk_size` was exceeded
-    """
-    temp_dir = tempfile.mkdtemp()
-    chunk_size = 60000  # Memory limit
-    key_counts = defaultdict(int)
-    temp_files = []
 
-    with open(file_path, newline='') as csvfile:
-        reader = csv.reader(csvfile)
+def hash_key(key: int,
+             num_buckets: int) -> int:
+    '''
+    Hash the key using murmurhash.
+    '''
+    return mmh3.hash(key) % num_buckets
+
+def count_keys(file_path: str,
+               num_buckets: int) -> int:
+    '''
+    Count occurrences of keys in the file using hashing.
+    '''
+    counts = defaultdict(int)
+    with open(file_path, 'r') as file:
+        reader = csv.reader(file)
         for row in reader:
             key = row[0]
-            key_counts[key] += 1
-            
-            if len(key_counts) >= chunk_size:
-                temp_file = os.path.join(temp_dir, f'temp_{len(temp_files)}.csv')
-                with open(temp_file, 'w', newline='') as tempf:
-                    writer = csv.writer(tempf)
-                    for k, count in key_counts.items():
-                        writer.writerow([k, count])
-                temp_files.append(temp_file)
-                key_counts.clear()
-    
-    if key_counts:
-        temp_file = os.path.join(temp_dir, f'temp_{len(temp_files)}.csv')
-        with open(temp_file, 'w', newline='') as tempf:
-            writer = csv.writer(tempf)
-            for k, count in key_counts.items():
-                writer.writerow([k, count])
-        temp_files.append(temp_file)
-    
-    # Aggregating values from temp files
-    final_counts = defaultdict(int)
-    for temp_file in temp_files:
-        with open(temp_file, newline='') as tempf:
-            reader = csv.reader(tempf)
-            for row in reader:
-                key, count = row
-                final_counts[key] += int(count)
-        os.remove(temp_file)
-    
-    os.rmdir(temp_dir)
+            bucket = hash_key(key, num_buckets)
+            counts[bucket] += 1
+    return counts
 
-    # Return keys which exceed the threshold
-    return {k for k, count in final_counts.items() if count > threshold}
-
-def find_common_heavy_keys(file1, file2, threshold):
-    # Get 'exceeding' keys from each file
-    heavy_keys_file1 = count_keys(file1, threshold)
-    heavy_keys_file2 = count_keys(file2, threshold)
+def find_problematic_keys(file1_path: str,
+                          file2_path: str,
+                          num_buckets: int,
+                          threshold: int) -> set:
+    '''
+    Find keys that have more than 60000 occurrences in both files.
+    '''
+    # First pass: Count keys in both files
+    counts1 = count_keys(file1_path, num_buckets)
+    counts2 = count_keys(file2_path, num_buckets)
     
-    # Find intersection - common keys
-    common_heavy_keys = heavy_keys_file1.intersection(heavy_keys_file2)
+    # Second pass: Identify problematic keys
+    problematic_keys = set()
+    for bucket in counts1:
+        if counts1[bucket] > threshold and counts2.get(bucket, 0) > threshold:
+            problematic_keys.add(bucket)
     
-    return common_heavy_keys
+    return problematic_keys
 
 
 if __name__ == '__main__':
+    
+    # Constants
+    num_buckets = 1000000  # Number of buckets for hashing
+    threshold = 60000      # Threshold for problematic keys
 
+    # Case 1. Regular behaviour. 10 keys exceed the threshold
+    
     pattern = [(10, 70000), (50, 30000)]  # 10 keys with 70,000 records each, 50 keys with 30,000 records
     gen_grouped_seq_fixed_keys("file1.csv", pattern, to_shuffle=True)
     gen_grouped_seq_fixed_keys("file2.csv", pattern, to_shuffle=True)
 
     file1 = 'file1.csv'
     file2 = 'file2.csv'
-    threshold = 60000
 
-    common_keys = find_common_heavy_keys(file1, file2, threshold)
-    print(f"Keys exceeding {threshold} occurrences in both files: {common_keys}")
+    common_keys = find_problematic_keys(file1, file2, num_buckets, threshold)
+    print(f"Regular case, 10 exceeding case:\nKeys exceeding {threshold} occurrences in both files: {common_keys}")
+    
+    # Case 2. All keys are unique
+    
+    pattern = [(100000, 1), (100000, 1)] 
+    gen_grouped_seq_fixed_keys("file1.csv", pattern, to_shuffle=True)
+    gen_grouped_seq_fixed_keys("file2.csv", pattern, to_shuffle=True)
+
+    file1 = 'file1.csv'
+    file2 = 'file2.csv'
+
+    common_keys = find_problematic_keys(file1, file2, num_buckets, threshold)
+    print(f"All unique case:\nKeys exceeding {threshold} occurrences in both files: {common_keys}")
+    
+    # Case 3. One key has 100k records, others are unique
+
+    pattern = [(1, 100000), (100000, 1)] 
+    gen_grouped_seq_fixed_keys("file1.csv", pattern, to_shuffle=True)
+    gen_grouped_seq_fixed_keys("file2.csv", pattern, to_shuffle=True)
+
+    file1 = 'file1.csv'
+    file2 = 'file2.csv'
+
+    common_keys = find_problematic_keys(file1, file2, num_buckets, threshold)
+    print(f"All unique case:\nKeys exceeding {threshold} occurrences in both files: {common_keys}")
+    
