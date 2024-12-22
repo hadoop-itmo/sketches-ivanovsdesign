@@ -43,7 +43,7 @@ def read_csv_keys(file_path):
 def estimate_join_size(file1: str,
                        file2: str) -> int:
     # Parameters for Bloom Filter and Count-Min Sketch
-    bloom_filter_size = 10**8  # 1 million unique keys
+    bloom_filter_size = 10**8  
     bloom_filter_error_rate = 0.01
     bloom_filter_k = 4
     cm_depth = 4
@@ -109,23 +109,29 @@ def estimate_join_size(file1: str,
     return join_size_estimate
 
 def run_experiments():
-    # Experiment 2: Non-intersecting sets with high confidence of zero intersection
+    # Experiment 1: Non-intersecting sets with high confidence of zero intersection
     gen_uniq_seq("file1_non_intersect.csv", 100000)
     gen_uniq_seq("file2_non_intersect.csv", 101000)
     print("Experiment: Non-Intersecting Sets Test")
     print(estimate_join_size("file1_non_intersect.csv", "file2_non_intersect.csv"))
 
-    # Experiment 3: Large join size detection (threshold 100,000)
-    shared_keys_large = [str(uuid.uuid4()) for _ in range(1_100_000)]
-    gen_shared_keys("file1_large_join.csv", "file2_large_join.csv", shared_keys_large, 100_000, 100_000)
-    print("Experiment: Large size JOIN")
-    print(estimate_join_size("file1_large_join.csv", "file2_large_join.csv"))
-
-    # Experiment 4: Reasonably accurate estimation for moderate intersection
-    shared_keys_moderate = [str(uuid.uuid4()) for _ in range(40_000)]
-    gen_shared_keys("file1_moderate.csv", "file2_moderate.csv", shared_keys_moderate, 40_000, 40_000)
+    # Experiment 2:  Reasonably accurate estimation for moderate intersection 
+    shared_keys_moderate = [str(uuid.uuid4()) for _ in range(1_100_000)]
+    gen_shared_keys("file1_moderate.csv", "file2_moderate.csv", shared_keys_moderate, 100_000, 100_000)
     print("Experiment: Moderate size JOIN")
     print(estimate_join_size("file1_moderate.csv", "file2_moderate.csv"))
+
+    # Experiment 3: Exact join
+    shared_keys_exact = [str(uuid.uuid4()) for _ in range(40_000)]
+    gen_shared_keys("file1_exact.csv", "file2_exact.csv", shared_keys_exact, 40_000, 40_000)
+    print("Experiment: Exact size JOIN")
+    print(estimate_join_size("file1_exact.csv", "file2_exact.csv"))
+    
+    # Experiment 4: Large join size detection (threshold 10 mil)
+    shared_keys_large = [str(uuid.uuid4()) for _ in range(5_000_000)]
+    gen_shared_keys("file1_large_join.csv", "file2_large_join.csv", shared_keys_large, 300_000, 300_000)
+    print("Experiment: Large JOIN")
+    print(estimate_join_size("file1_large_join.csv", "file2_large_join.csv"))
 
     # Clean up generated files
     os.remove("file1_non_intersect.csv")
@@ -134,6 +140,8 @@ def run_experiments():
     os.remove("file2_large_join.csv")
     os.remove("file1_moderate.csv")
     os.remove("file2_moderate.csv")
+    os.remove("file1_exact.csv")
+    os.remove("file2_exact.csv")
     
 
 if __name__ == '__main__':
@@ -144,14 +152,13 @@ if __name__ == '__main__':
     '''
     Expected output: 
     
-    (venv) (base) a1@MacBook-Pro-4 sketches-ivanovsdesign % python task6.py
-    0
-    0
     Experiment: Non-Intersecting Sets Test
     0
-    Experiment: Large size JOIN
-    2161483
     Experiment: Moderate size JOIN
+    2160236
+    Experiment: Exact size JOIN
     40000
-    --- 35.97428798675537 seconds ---
+    Experiment: Large JOIN
+    JOIN size exceeds 10 million
+    --- 153.83575916290283 seconds ---
     '''
